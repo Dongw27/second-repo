@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <title>Title</title>
+  <link rel="stylesheet" th:href="@{/css/main.css}">
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+  <script type="text/javascript" src="https://code.jquery.com/jquery-3.6.1.min.js"></script>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=6b51c989caf05a5b7ad4e3df7cf95c87"></script>
+  <script type="text/javascript" th:src="@{/js/kakaoApi.js}"></script>
+
+  <script th:inline="javascript">
+    $(document).ready(function () {
+      var address = /*[[${vo2 != null ? vo2.address : ''}]]*/ '';
+      var relationAddrs = /*[[${relationaddr}]]*/ '';
+      var relationTitles = /*[[${relationTitle}]]*/ '';  // 관련 장소 제목
+      var mainTitle = /*[[${vo2 != null ? "'" + vo2.title + "'" : "'메인 장소'"}]]*/ '';
+
+      console.log("메인 주소:", address);
+      console.log("관련 주소들 (원본):", relationAddrs);
+      console.log("관련 제목들 (원본):", relationTitles);
+      console.log("mainTitle:",mainTitle)
+
+      // relationAddrs, relationTitles를 배열로 변환
+      var relatedAddresses = relationAddrs.split(/\s*[\n,]\s*/).filter(addr => addr.trim() !== "");
+      var relatedTitles = relationTitles.split(/\s*[\n,]\s*/).filter(title => title.trim() !== "");
+
+      console.log("관련 주소들 (배열):", relatedAddresses);
+      console.log("관련 제목들 (배열):", relatedTitles);
+
+      var container = document.getElementById('kakaoMap');
+      var options = {
+        center: new kakao.maps.LatLng(37.5665, 126.9780), // 기본 중심 (서울)
+        level: 5
+      };
+      var map = new kakao.maps.Map(container, options);
+
+      function isValidAddress(addr) {
+        addr = addr.trim();
+        if (!addr) return false;
+        if (addr.length < 7) {
+          console.warn("주소 제외됨 (너무 짧음):", addr);
+          return false;
+        }
+        return true;
+      }
+
+      function addMarker(address, title, isMain) {
+        var fixedAddress = address.trim();
+        if (!fixedAddress || !isValidAddress(fixedAddress)) return;
+
+        console.log("검색할 주소:", fixedAddress);
+
+        $.ajax({
+          url: 'https://dapi.kakao.com/v2/local/search/address.json?query=' + encodeURIComponent(fixedAddress),
+          type: 'GET',
+          headers: { 'Authorization': 'KakaoAK 0bde665bc851b71a26d5782ccc319b9e' },
+          success: function (data) {
+            if (data.documents.length > 0) {
+              const placeLA = data.documents[0].y;
+              const placeLO = data.documents[0].x;
+              var markerLocation = new kakao.maps.LatLng(placeLA, placeLO);
+
+              if (isMain) {
+                map.setCenter(markerLocation);
+              }
+
+              var marker = new kakao.maps.Marker({
+                position: markerLocation,
+                map: map
+              });
+
+              // 메인 마커는 정보창 없음
+              if (!isMain) {
+                var infoWindow = new kakao.maps.InfoWindow({
+                  content: `
+                <div style="
+                  padding: 10px;
+                  font-size: 12px;
+                  width: 200px;
+                  text-align: center;
+                  font-weight: bold;
+                  background: rgba(30, 144, 255, 1); /* 하늘색 (불투명) */
+                  color: white;
+                  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.3);
+                ">${title}</div>`
+                });
+
+
+                // 마커에 정보창 상태 저장 (열림 여부)
+                marker.isOpen = false;
+
+                kakao.maps.event.addListener(marker, 'click', function () {
+                  if (marker.isOpen) {
+                    infoWindow.close();  // 이름 닫기
+                  } else {
+                    infoWindow.open(map, marker);  // 이름 열기
+                  }
+                  marker.isOpen = !marker.isOpen;  // 상태 변경
+                });
+
+                console.log("마커 추가됨:", fixedAddress, placeLA, placeLO, "제목:", title);
+              } else {
+                console.log("메인 마커 추가됨 (정보창 없음):", fixedAddress, placeLA, placeLO);
+              }
+            } else {
+              console.warn("주소 검색 실패 (응답 없음):", fixedAddress);
+            }
+          },
+          error: function (e) {
+            console.error("API 요청 실패:", fixedAddress, e);
+          }
+        });
+      }
+
+      // 메인 마커 추가 (정보창 없음)
+      if (address.trim()) {
+        addMarker(address, mainTitle, true);
+      }
+
+      // 관련 장소 마커 추가 (클릭하면 정보창 열림/닫힘)
+      relatedAddresses.forEach((addr, index) => {
+        var title = relatedTitles[index];  // 제목이 없으면 기본값 설정
+        addMarker(addr, title, false);
+      });
+    });
+  </script>
+</head>
+<body th:replace="~{layout::layout}">
+<div th:fragment="content">
+  <h1>관광명소 상세 페이지</h1>
+  <div th:if="${vo2 == null}" class="alert alert-warning">
+    데이터를 찾을 수 없습니다. 관광명소 데이터가 존재하지 않습니다.
+  </div>
+
+  <table id="customers" th:if="${vo2 != null}">
+    <thead>
+    <tr>
+      <th>no</th>
+      <th>district</th>
+      <th>title</th>
+      <th>description</th>
+      <th>address</th>
+      <th>phone</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td th:text="${vo2.no}"></td>
+      <td th:text="${vo2.district}"></td>
+      <td th:text="${vo2.title}"></td>
+      <td th:text="${vo2.description}"></td>
+      <td th:text="${vo2.address}"></td>
+      <td th:text="${vo2.phone}"></td>
+    </tr>
+    <tr>
+      <td colspan="2">관광지 이미지</td>
+      <td colspan="4">
+        <th:block th:if="${imageUrl != 'No image available'}">
+          <img id="dynamicImage" th:src="${imageUrl}" width="200" alt="Image">
+        </th:block>
+        <th:block th:if="${imageUrl == 'No image available'}">
+          <p>이미지가 없습니다.</p>
+        </th:block>
+      </td>
+    </tr>
+
+    <td colspan="2">연관 관광명소</td>
+    <td colspan="4" th:if="${relationTitle != ''}" th:text="${#strings.listJoin(relationTitle.split('\n'), ', ')}"></td>
+    <td colspan="4" th:unless="${relationTitle != ''}">관광명소가 없습니다.</td>
+    </td>
+    <tr>
+      <td colspan="2">카카오 맵</td>
+      <td colspan="4" th:rowspan="5">
+        <div id="kakaoMap" style="width:500px;height:400px;"></div>
+      </td>
+    </tr>
+    </tbody>
+    <tfoot>
+    <tr>
+      <td colspan="5">
+        <a th:href="@{/travel/update(no=${vo2.no})}">관광지수정</a>
+        <a th:href="@{/travel/delete(no=${vo2.no})}">관광지삭제</a>
+      </td>
+    </tr>
+    </tfoot>
+  </table>
+</div>
+</body>
+</html>
